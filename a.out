@@ -1,0 +1,432 @@
+diff --git a/configs/tanks_and_temples/tat_training_truck.txt b/configs/tanks_and_temples/tat_training_truck.txt
+index ee687a6..afc6a76 100644
+--- a/configs/tanks_and_temples/tat_training_truck.txt
++++ b/configs/tanks_and_temples/tat_training_truck.txt
+@@ -1,5 +1,5 @@
+ ### INPUT
+-datadir = ./data/tanks_and_temples
++datadir = /media/linger/ubuntu/null_max/data_all/tanks_and_temples/tanks_and_temples
+ scene = tat_training_Truck
+ expname = tat_training_Truck
+ basedir = ./logs
+diff --git a/data_loader_split.py b/data_loader_split.py
+index 8fb7bd8..87a33de 100644
+--- a/data_loader_split.py
++++ b/data_loader_split.py
+@@ -42,7 +42,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
+ 
+     # camera parameters files
+     intrinsics_files = find_files('{}/intrinsics'.format(split_dir), exts=['*.txt'])
+-    pose_files = find_files('{}/pose'.format(split_dir), exts=['*.txt'])
++    pose_files = find_files('{}/poses'.format(split_dir), exts=['*.txt'])
+     logger.info('raw intrinsics_files: {}'.format(len(intrinsics_files)))
+     logger.info('raw pose_files: {}'.format(len(pose_files)))
+ 
+@@ -59,6 +59,15 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
+     else:
+         img_files = [None, ] * cam_cnt
+ 
++    # semantic files
++    semantic_files = find_files('{}/semantic'.format(split_dir), exts=['*.png', '*.jpg'])
++    if len(semantic_files) > 0:
++        logger.info('raw img_files: {}'.format(len(semantic_files)))
++        semantic_files = semantic_files[::skip]
++        assert (len(semantic_files) == cam_cnt)
++    else:
++        semantic_files = [None, ] * cam_cnt
++
+     # mask files
+     mask_files = find_files('{}/mask'.format(split_dir), exts=['*.png', '*.jpg'])
+     if len(mask_files) > 0:
+@@ -96,6 +105,7 @@ def load_data_split(basedir, scene, split, skip=1, try_load_min_depth=True, only
+ 
+         ray_samplers.append(RaySamplerSingleImage(H=H, W=W, intrinsics=intrinsics, c2w=pose,
+                                                   img_path=img_files[i],
++                                                  semantic_path=semantic_files[i],
+                                                   mask_path=mask_files[i],
+                                                   min_depth_path=mindepth_files[i],
+                                                   max_depth=max_depth))
+diff --git a/ddp_model.py b/ddp_model.py
+index 07cd0fb..4c89130 100644
+--- a/ddp_model.py
++++ b/ddp_model.py
+@@ -102,7 +102,8 @@ class NerfNet(nn.Module):
+         T = torch.cat((torch.ones_like(T[..., 0:1]), T[..., :-1]), dim=-1)  # [..., N_samples]
+         fg_weights = fg_alpha * T     # [..., N_samples]
+         fg_rgb_map = torch.sum(fg_weights.unsqueeze(-1) * fg_raw['rgb'], dim=-2)  # [..., 3]
+-        fg_depth_map = torch.sum(fg_weights * fg_z_vals, dim=-1)     # [...,]
++        fg_depth_map = torch.sum(fg_weights * fg_z_vals, dim=-1)  # [...,]
++        fg_semantic_map = torch.sum(fg_weights.unsqueeze(-1) * fg_raw['semantic'], dim=-2)
+ 
+         # render background
+         N_samples = bg_z_vals.shape[-1]
+@@ -123,14 +124,17 @@ class NerfNet(nn.Module):
+         # maths show weights, and summation of weights along a ray, are always inside [0, 1]
+         T = torch.cumprod(1. - bg_alpha + TINY_NUMBER, dim=-1)[..., :-1]  # [..., N_samples-1]
+         T = torch.cat((torch.ones_like(T[..., 0:1]), T), dim=-1)  # [..., N_samples]
+-        bg_weights = bg_alpha * T  # [..., N_samples]
++        bg_weights = bg_alpha * T # [..., N_samples]
+         bg_rgb_map = torch.sum(bg_weights.unsqueeze(-1) * bg_raw['rgb'], dim=-2)  # [..., 3]
+         bg_depth_map = torch.sum(bg_weights * bg_z_vals, dim=-1)  # [...,]
++        bg_semantic_map = torch.sum(bg_weights.unsqueeze(-1) * bg_raw['semantic'], dim=-2)
+ 
+         # composite foreground and background
+         bg_rgb_map = bg_lambda.unsqueeze(-1) * bg_rgb_map
++        bg_semantic_map = bg_lambda.unsqueeze(-1) * bg_semantic_map
+         bg_depth_map = bg_lambda * bg_depth_map
+         rgb_map = fg_rgb_map + bg_rgb_map
++        semantic_map = fg_semantic_map + bg_semantic_map
+ 
+         ret = OrderedDict([('rgb', rgb_map),            # loss
+                            ('fg_weights', fg_weights),  # importance sampling
+@@ -139,7 +143,10 @@ class NerfNet(nn.Module):
+                            ('fg_depth', fg_depth_map),
+                            ('bg_rgb', bg_rgb_map),
+                            ('bg_depth', bg_depth_map),
+-                           ('bg_lambda', bg_lambda)])
++                           ('bg_lambda', bg_lambda),
++                           ('semantic', semantic_map),
++                           ('bg_semantic', bg_semantic_map),
++                           ('fg_semantic', fg_semantic_map)])
+         return ret
+ 
+ 
+diff --git a/ddp_train_nerf.py b/ddp_train_nerf.py
+index 8988318..90f34aa 100644
+--- a/ddp_train_nerf.py
++++ b/ddp_train_nerf.py
+@@ -14,7 +14,10 @@ from tensorboardX import SummaryWriter
+ from utils import img2mse, mse2psnr, img_HWC2CHW, colorize, TINY_NUMBER
+ import logging
+ import json
++import os
++import torch
+ 
++os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+ 
+ logger = logging.getLogger(__package__)
+ 
+@@ -239,11 +242,39 @@ def render_single_image(rank, world_size, models, ray_sampler, chunk_size):
+     else:
+         return None
+ 
++def label_img_to_color(img):
++    label_to_color = {
++        0: [128, 64,128],
++        1: [244, 35,232],
++        2: [ 70, 70, 70],
++        3: [102,102,156],
++        4: [190,153,153],
++        5: [153,153,153],
++        6: [250,170, 30]
++        }
++
++    img_height, img_width = img.shape
++
++    img_color = np.zeros((img_height, img_width, 3))
++    for row in range(img_height):
++        for col in range(img_width):
++            label = img[row, col]
++
++            img_color[row, col] = np.array(label_to_color[label])
++
++    return img_color
++
+ 
+-def log_view_to_tb(writer, global_step, log_data, gt_img, mask, prefix=''):
++def log_view_to_tb(writer, global_step, log_data, gt_img, gt_semantic, mask, prefix=''):
+     rgb_im = img_HWC2CHW(torch.from_numpy(gt_img))
+     writer.add_image(prefix + 'rgb_gt', rgb_im, global_step)
+ 
++    logits_2_label = lambda x: torch.argmax(torch.nn.functional.softmax(x, dim=-1), dim=-1)
++
++    semantic_im = torch.from_numpy(label_img_to_color(gt_semantic))
++    semantic_im = img_HWC2CHW(semantic_im)
++    writer.add_image(prefix + 'semantic_gt', semantic_im, global_step)
++
+     for m in range(len(log_data)):
+         rgb_im = img_HWC2CHW(log_data[m]['rgb'])
+         rgb_im = torch.clamp(rgb_im, min=0., max=1.)  # just in case diffuse+specular>1
+@@ -260,6 +291,25 @@ def log_view_to_tb(writer, global_step, log_data, gt_img, mask, prefix=''):
+         rgb_im = img_HWC2CHW(log_data[m]['bg_rgb'])
+         rgb_im = torch.clamp(rgb_im, min=0., max=1.)  # just in case diffuse+specular>1
+         writer.add_image(prefix + 'level_{}/bg_rgb'.format(m), rgb_im, global_step)
++
++        semantic_im = logits_2_label(log_data[m]['semantic'])
++        semantic_im = label_img_to_color(semantic_im.numpy())
++        semantic_im = torch.from_numpy(semantic_im)
++        semantic_im = img_HWC2CHW(semantic_im)
++        writer.add_image(prefix + 'level_{}/semantic'.format(m), semantic_im, global_step)
++
++        semantic_im = logits_2_label(log_data[m]['fg_semantic'])
++        semantic_im = label_img_to_color(semantic_im.numpy())
++        semantic_im = torch.from_numpy(semantic_im)
++        semantic_im = img_HWC2CHW(semantic_im)
++        writer.add_image(prefix + 'level_{}/fg_semantic'.format(m), semantic_im, global_step)
++
++        semantic_im = logits_2_label(log_data[m]['bg_semantic'])
++        semantic_im = label_img_to_color(semantic_im.numpy())
++        semantic_im = torch.from_numpy(semantic_im)
++        semantic_im = img_HWC2CHW(semantic_im)
++        writer.add_image(prefix + 'level_{}/bg_semantic'.format(m), semantic_im, global_step)
++
+         depth = log_data[m]['bg_depth']
+         depth_im = img_HWC2CHW(colorize(depth, cmap_name='jet', append_cbar=True,
+                                         mask=mask))
+@@ -350,8 +400,8 @@ def ddp_train_nerf(rank, args):
+         args.chunk_size = 8192
+     else:
+         logger.info('setting batch size according to 12G gpu')
+-        args.N_rand = 512
+-        args.chunk_size = 4096
++        args.N_rand = 32
++        args.chunk_size = 32
+ 
+     ###### Create log dir and copy the config file
+     if rank == 0:
+@@ -369,7 +419,7 @@ def ddp_train_nerf(rank, args):
+ 
+     ray_samplers = load_data_split(args.datadir, args.scene, split='train',
+                                    try_load_min_depth=args.load_min_depth)
+-    val_ray_samplers = load_data_split(args.datadir, args.scene, split='validation',
++    val_ray_samplers = load_data_split(args.datadir, args.scene, split='test',
+                                        try_load_min_depth=args.load_min_depth, skip=args.testskip)
+ 
+     # write training image names for autoexposure
+@@ -381,6 +431,7 @@ def ddp_train_nerf(rank, args):
+ 
+     ###### create network and wrap in ddp; each process should do this
+     start, models = create_nerf(rank, args)
++    CrossEntropyLoss = nn.CrossEntropyLoss(ignore_index=0)
+ 
+     ##### important!!!
+     # make sure different processes sample different rays
+@@ -450,6 +501,7 @@ def ddp_train_nerf(rank, args):
+             all_rets.append(ret)
+ 
+             rgb_gt = ray_batch['rgb'].to(rank)
++            semantic_gt = ray_batch['semantic'].to(rank)
+             if 'autoexpo' in ret:
+                 scale, shift = ret['autoexpo']
+                 scalars_to_log['level_{}/autoexpo_scale'.format(m)] = scale.item()
+@@ -457,12 +509,15 @@ def ddp_train_nerf(rank, args):
+                 # rgb_gt = scale * rgb_gt + shift
+                 rgb_pred = (ret['rgb'] - shift) / scale
+                 rgb_loss = img2mse(rgb_pred, rgb_gt)
+-                loss = rgb_loss + args.lambda_autoexpo * (torch.abs(scale-1.)+torch.abs(shift))
++                semantic_loss = CrossEntropyLoss(ret['semantic'], semantic_gt.long())
++                loss = rgb_loss + args.lambda_autoexpo * (torch.abs(scale-1.)+torch.abs(shift)) + semantic_loss * args.semantic_wgt
+             else:
+                 rgb_loss = img2mse(ret['rgb'], rgb_gt)
+-                loss = rgb_loss
++                semantic_loss = CrossEntropyLoss(ret['semantic'], semantic_gt.long())
++                loss = rgb_loss + semantic_loss * args.semantic_wgt
+             scalars_to_log['level_{}/loss'.format(m)] = rgb_loss.item()
+             scalars_to_log['level_{}/pnsr'.format(m)] = mse2psnr(rgb_loss.item())
++            scalars_to_log['level_{}/semantic'.format(m)] = semantic_loss.item()
+             loss.backward()
+             optim.step()
+ 
+@@ -491,7 +546,7 @@ def ddp_train_nerf(rank, args):
+             dt = time.time() - time0
+             if rank == 0:    # only main process should do this
+                 logger.info('Logged a random validation view in {} seconds'.format(dt))
+-                log_view_to_tb(writer, global_step, log_data, gt_img=val_ray_samplers[idx].get_img(), mask=None, prefix='val/')
++                log_view_to_tb(writer, global_step, log_data, gt_img=val_ray_samplers[idx].get_img(), gt_semantic=val_ray_samplers[idx].get_semantic(), mask=None, prefix='val/')
+ 
+             time0 = time.time()
+             idx = what_train_to_log % len(ray_samplers)
+@@ -500,7 +555,7 @@ def ddp_train_nerf(rank, args):
+             dt = time.time() - time0
+             if rank == 0:   # only main process should do this
+                 logger.info('Logged a random training view in {} seconds'.format(dt))
+-                log_view_to_tb(writer, global_step, log_data, gt_img=ray_samplers[idx].get_img(), mask=None, prefix='train/')
++                log_view_to_tb(writer, global_step, log_data, gt_img=ray_samplers[idx].get_img(), gt_semantic=ray_samplers[idx].get_semantic(), mask=None, prefix='train/')
+ 
+             del log_data
+             torch.cuda.empty_cache()
+@@ -525,25 +580,25 @@ def config_parser():
+     import configargparse
+     parser = configargparse.ArgumentParser()
+     parser.add_argument('--config', is_config_file=True, help='config file path')
+-    parser.add_argument("--expname", type=str, help='experiment name')
++    parser.add_argument("--expname", type=str, default='nuscenes', help='experiment name')
+     parser.add_argument("--basedir", type=str, default='./logs/', help='where to store ckpts and logs')
+     # dataset options
+-    parser.add_argument("--datadir", type=str, default=None, help='input data directory')
+-    parser.add_argument("--scene", type=str, default=None, help='scene name')
++    parser.add_argument("--datadir", type=str, default='/media/linger/ubuntu/null_max/label_manual/nerfplusplus', help='input data directory')
++    parser.add_argument("--scene", type=str, default='nuscenes', help='scene name')
+     parser.add_argument("--testskip", type=int, default=8,
+                         help='will load 1/N images from test/val sets, useful for large datasets like deepvoxels')
+     # model size
+-    parser.add_argument("--netdepth", type=int, default=8, help='layers in coarse network')
+-    parser.add_argument("--netwidth", type=int, default=256, help='channels per layer in coarse network')
++    parser.add_argument("--netdepth", type=int, default=4, help='layers in coarse network')
++    parser.add_argument("--netwidth", type=int, default=64, help='channels per layer in coarse network')
+     parser.add_argument("--use_viewdirs", action='store_true', help='use full 5D input instead of 3D')
+     # checkpoints
+     parser.add_argument("--no_reload", action='store_true', help='do not reload weights from saved ckpt')
+     parser.add_argument("--ckpt_path", type=str, default=None,
+                         help='specific weights npy file to reload for coarse network')
+     # batch size
+-    parser.add_argument("--N_rand", type=int, default=32 * 32 * 2,
++    parser.add_argument("--N_rand", type=int, default=32,
+                         help='batch size (number of random rays per gradient step)')
+-    parser.add_argument("--chunk_size", type=int, default=1024 * 8,
++    parser.add_argument("--chunk_size", type=int, default=16,
+                         help='number of rays processed in parallel, decrease if running out of memory')
+     # iterations
+     parser.add_argument("--N_iters", type=int, default=250001,
+@@ -552,7 +607,7 @@ def config_parser():
+     parser.add_argument("--render_splits", type=str, default='test',
+                         help='splits to render')
+     # cascade training
+-    parser.add_argument("--cascade_level", type=int, default=2,
++    parser.add_argument("--cascade_level", type=int, default=1,
+                         help='number of cascade levels')
+     parser.add_argument("--cascade_samples", type=str, default='64,64',
+                         help='samples at each level')
+@@ -579,8 +634,9 @@ def config_parser():
+     parser.add_argument("--load_min_depth", action='store_true', help='whether to load min depth')
+     # logging/saving options
+     parser.add_argument("--i_print", type=int, default=100, help='frequency of console printout and metric loggin')
+-    parser.add_argument("--i_img", type=int, default=500, help='frequency of tensorboard image logging')
++    parser.add_argument("--i_img", type=int, default=2, help='frequency of tensorboard image logging')
+     parser.add_argument("--i_weights", type=int, default=10000, help='frequency of weight ckpt saving')
++    parser.add_argument("--semantic_wgt", type=float, default=0, help='frequency of weight ckpt saving')
+ 
+     return parser
+ 
+diff --git a/nerf_network.py b/nerf_network.py
+index 41eabd9..1ebc913 100644
+--- a/nerf_network.py
++++ b/nerf_network.py
+@@ -69,7 +69,7 @@ def weights_init(m):
+ 
+ class MLPNet(nn.Module):
+     def __init__(self, D=8, W=256, input_ch=3, input_ch_viewdirs=3,
+-                 skips=[4], use_viewdirs=False):
++                 skips=[4], use_viewdirs=False, num_semantic_classes=7):
+         '''
+         :param D: network depth
+         :param W: network width
+@@ -99,7 +99,23 @@ class MLPNet(nn.Module):
+ 
+         sigma_layers = [nn.Linear(dim, 1), ]       # sigma must be positive
+         self.sigma_layers = nn.Sequential(*sigma_layers)
+-        # self.sigma_layers.apply(weights_init)      # xavier init
++        self.sigma_layers.apply(weights_init)      # xavier init
++
++        # semantic
++        semantic_layers = []
++        base_remap_seman_layers = [nn.Linear(dim, 256), ]
++        self.base_remap_seman_layers = nn.Sequential(*base_remap_seman_layers)
++        self.base_remap_seman_layers.apply(weights_init)
++
++        dim_ = 256
++        for i in range(1):
++            semantic_layers.append(nn.Linear(dim_, W // 2))
++            semantic_layers.append(nn.ReLU())
++            dim_ = W // 2
++        semantic_layers.append(nn.Linear(dim_, num_semantic_classes))
++        semantic_layers.append(nn.Sigmoid())  # rgb values are normalized to [0, 1]
++        self.semantic_layers = nn.Sequential(*semantic_layers)
++        # self.semantic_layers.apply(weights_init)
+ 
+         # rgb color
+         rgb_layers = []
+@@ -131,12 +147,15 @@ class MLPNet(nn.Module):
+             base = self.base_layers[i+1](base)
+ 
+         sigma = self.sigma_layers(base)
+-        sigma = torch.abs(sigma)
++
++        semantic = self.base_remap_seman_layers(base)
++        semantic = self.semantic_layers(semantic)
+ 
+         base_remap = self.base_remap_layers(base)
+         input_viewdirs = input[..., -self.input_ch_viewdirs:]
+         rgb = self.rgb_layers(torch.cat((base_remap, input_viewdirs), dim=-1))
+ 
+         ret = OrderedDict([('rgb', rgb),
++                           ('semantic', semantic),
+                            ('sigma', sigma.squeeze(-1))])
+         return ret
+diff --git a/nerf_sample_ray_split.py b/nerf_sample_ray_split.py
+index 21e9caa..a3a7824 100644
+--- a/nerf_sample_ray_split.py
++++ b/nerf_sample_ray_split.py
+@@ -37,7 +37,8 @@ def get_rays_single_image(H, W, intrinsics, c2w):
+ class RaySamplerSingleImage(object):
+     def __init__(self, H, W, intrinsics, c2w,
+                        img_path=None,
+-                       resolution_level=1,
++                       semantic_path=None,
++                       resolution_level=100,
+                        mask_path=None,
+                        min_depth_path=None,
+                        max_depth=None):
+@@ -48,6 +49,7 @@ class RaySamplerSingleImage(object):
+         self.c2w_mat = c2w
+ 
+         self.img_path = img_path
++        self.semantic_path = semantic_path
+         self.mask_path = mask_path
+         self.min_depth_path = min_depth_path
+         self.max_depth = max_depth
+@@ -70,6 +72,13 @@ class RaySamplerSingleImage(object):
+             else:
+                 self.img = None
+ 
++            if self.semantic_path is not None:
++                self.semantic = cv2.imread(self.semantic_path, cv2.IMREAD_UNCHANGED)[:, :, 0]
++                self.semantic = cv2.resize(self.semantic, (self.W, self.H), interpolation=cv2.INTER_NEAREST)
++                self.semantic = self.semantic.reshape((-1))
++            else:
++                self.semantic = None
++
+             if self.mask_path is not None:
+                 self.mask = imageio.imread(self.mask_path).astype(np.float32) / 255.
+                 self.mask = cv2.resize(self.mask, (self.W, self.H), interpolation=cv2.INTER_NEAREST)
+@@ -93,6 +102,12 @@ class RaySamplerSingleImage(object):
+         else:
+             return None
+ 
++    def get_semantic(self):
++        if self.img is not None:
++            return self.semantic.reshape((self.H, self.W))
++        else:
++            return None
++
+     def get_all(self):
+         if self.min_depth is not None:
+             min_depth = self.min_depth
+@@ -104,6 +119,7 @@ class RaySamplerSingleImage(object):
+             ('ray_d', self.rays_d),
+             ('depth', self.depth),
+             ('rgb', self.img),
++            ('semantic', self.semantic),
+             ('mask', self.mask),
+             ('min_depth', min_depth)
+         ])
+@@ -147,6 +163,11 @@ class RaySamplerSingleImage(object):
+         else:
+             rgb = None
+ 
++        if self.semantic is not None:
++            semantic = self.semantic[select_inds]          # [N_rand]
++        else:
++            semantic = None
++
+         if self.mask is not None:
+             mask = self.mask[select_inds]
+         else:
+@@ -162,6 +183,7 @@ class RaySamplerSingleImage(object):
+             ('ray_d', rays_d),
+             ('depth', depth),
+             ('rgb', rgb),
++            ('semantic', semantic),
+             ('mask', mask),
+             ('min_depth', min_depth),
+             ('img_name', self.img_path)

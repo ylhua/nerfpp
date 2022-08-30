@@ -1,0 +1,113 @@
+labels = [
+    #       name                     id    kittiId,    trainId   category            catId     hasInstances   ignoreInEval   ignoreInInst   color
+    Label(  'unlabeled'            ,  0 ,       -1 ,       255 , 'void'            , 0       , False        , True         , True         , (  0,  0,  0) ),
+    Label(  'ego vehicle'          ,  1 ,       -1 ,       255 , 'void'            , 0       , False        , True         , True         , (  0,  0,  0) ),
+    Label(  'rectification border' ,  2 ,       -1 ,       255 , 'void'            , 0       , False        , True         , True         , (  0,  0,  0) ),
+    Label(  'out of roi'           ,  3 ,       -1 ,       255 , 'void'            , 0       , False        , True         , True         , (  0,  0,  0) ),
+    Label(  'static'               ,  4 ,       -1 ,       255 , 'void'            , 0       , False        , True         , True         , (  0,  0,  0) ),
+    Label(  'dynamic'              ,  5 ,       -1 ,       255 , 'void'            , 0       , False        , True         , True         , (111, 74,  0) ),
+    Label(  'ground'               ,  6 ,       -1 ,       255 , 'void'            , 0       , False        , True         , True         , ( 81,  0, 81) ),
+    Label(  'road'                 ,  7 ,        1 ,         0 , 'flat'            , 1       , False        , False        , False        , (128, 64,128) ),
+    Label(  'sidewalk'             ,  8 ,        3 ,         1 , 'flat'            , 1       , False        , False        , False        , (244, 35,232) ),
+    Label(  'parking'              ,  9 ,        2 ,       255 , 'flat'            , 1       , False        , True         , True         , (250,170,160) ),
+    Label(  'rail track'           , 10 ,        10,       255 , 'flat'            , 1       , False        , True         , True         , (230,150,140) ),
+    Label(  'building'             , 11 ,        11,         2 , 'construction'    , 2       , True         , False        , False        , ( 70, 70, 70) ),
+    Label(  'wall'                 , 12 ,        7 ,         3 , 'construction'    , 2       , False        , False        , False        , (102,102,156) ),
+    Label(  'fence'                , 13 ,        8 ,         4 , 'construction'    , 2       , False        , False        , False        , (190,153,153) ),
+    Label(  'guard rail'           , 14 ,        30,       255 , 'construction'    , 2       , False        , True         , True         , (180,165,180) ),
+    Label(  'bridge'               , 15 ,        31,       255 , 'construction'    , 2       , False        , True         , True         , (150,100,100) ),
+    Label(  'tunnel'               , 16 ,        32,       255 , 'construction'    , 2       , False        , True         , True         , (150,120, 90) ),
+    Label(  'pole'                 , 17 ,        21,         5 , 'object'          , 3       , True         , False        , True         , (153,153,153) ),
+    Label(  'polegroup'            , 18 ,       -1 ,       255 , 'object'          , 3       , False        , True         , True         , (153,153,153) ),
+    Label(  'traffic light'        , 19 ,        23,         6 , 'object'          , 3       , True         , False        , True         , (250,170, 30) ),
+    Label(  'traffic sign'         , 20 ,        24,         7 , 'object'          , 3       , True         , False        , True         , (220,220,  0) ),
+    Label(  'vegetation'           , 21 ,        5 ,         8 , 'nature'          , 4       , False        , False        , False        , (107,142, 35) ),
+    Label(  'terrain'              , 22 ,        4 ,         9 , 'nature'          , 4       , False        , False        , False        , (152,251,152) ),
+    Label(  'sky'                  , 23 ,        9 ,        10 , 'sky'             , 5       , False        , False        , False        , ( 70,130,180) ),
+    Label(  'person'               , 24 ,        19,        11 , 'human'           , 6       , True         , False        , False        , (220, 20, 60) ),
+    Label(  'rider'                , 25 ,        20,        12 , 'human'           , 6       , True         , False        , False        , (255,  0,  0) ),
+    Label(  'car'                  , 26 ,        13,        13 , 'vehicle'         , 7       , True         , False        , False        , (  0,  0,142) ),
+    Label(  'truck'                , 27 ,        14,        14 , 'vehicle'         , 7       , True         , False        , False        , (  0,  0, 70) ),
+    Label(  'bus'                  , 28 ,        34,        15 , 'vehicle'         , 7       , True         , False        , False        , (  0, 60,100) ),
+    Label(  'caravan'              , 29 ,        16,       255 , 'vehicle'         , 7       , True         , True         , True         , (  0,  0, 90) ),
+    Label(  'trailer'              , 30 ,        15,       255 , 'vehicle'         , 7       , True         , True         , True         , (  0,  0,110) ),
+    Label(  'train'                , 31 ,        33,        16 , 'vehicle'         , 7       , True         , False        , False        , (  0, 80,100) ),
+    Label(  'motorcycle'           , 32 ,        17,        17 , 'vehicle'         , 7       , True         , False        , False        , (  0,  0,230) ),
+    Label(  'bicycle'              , 33 ,        18,        18 , 'vehicle'         , 7       , True         , False        , False        , (119, 11, 32) ),
+    Label(  'garage'               , 34 ,        12,         2 , 'construction'    , 2       , True         , True         , True         , ( 64,128,128) ),
+    Label(  'gate'                 , 35 ,        6 ,         4 , 'construction'    , 2       , False        , True         , True         , (190,153,153) ),
+    Label(  'stop'                 , 36 ,        29,       255 , 'construction'    , 2       , True         , True         , True         , (150,120, 90) ),
+    Label(  'smallpole'            , 37 ,        22,         5 , 'object'          , 3       , True         , True         , True         , (153,153,153) ),
+    Label(  'lamp'                 , 38 ,        25,       255 , 'object'          , 3       , True         , True         , True         , (0,   64, 64) ),
+    Label(  'trash bin'            , 39 ,        26,       255 , 'object'          , 3       , True         , True         , True         , (0,  128,192) ),
+    Label(  'vending machine'      , 40 ,        27,       255 , 'object'          , 3       , True         , True         , True         , (128, 64,  0) ),
+    Label(  'box'                  , 41 ,        28,       255 , 'object'          , 3       , True         , True         , True         , (64,  64,128) ),
+    Label(  'unknown construction' , 42 ,        35,       255 , 'void'            , 0       , False        , True         , True         , (102,  0,  0) ),
+    Label(  'unknown vehicle'      , 43 ,        36,       255 , 'void'            , 0       , False        , True         , True         , ( 51,  0, 51) ),
+    Label(  'unknown object'       , 44 ,        37,       255 , 'void'            , 0       , False        , True         , True         , ( 32, 32, 32) ),
+    Label(  'license plate'        , -1 ,        -1,        -1 , 'vehicle'         , 7       , False        , True         , True         , (  0,  0,142) ),
+]
+
+100m
+[INFO] root: psnr=19.02122302553545, ssim=0.7209753148956257, miou=0.19276079184165745,
+miou_class=0.1953250626445887, total_acc=0.5802138732818404, class_avg_acc=0.25686573830830883,
+
+ious=[       nan        nan        nan        nan        nan        nan
+             nan   0.91387(road)   nan        nan        nan      0.1335(building)
+             nan        nan        nan        nan        nan        nan
+             nan        nan        nan 0.2793(vegetation) nan      0.7655(sky)
+             nan        nan        nan        nan        nan        nan
+             nan        nan        nan        nan        nan        nan
+             nan        nan        nan        nan        nan        nan
+             nan        nan        nan        nan]
+
+
+50m
+[INFO] root: psnr=25.671364427105214, ssim=0.8916551359449387, miou=0.3926520569165334,
+miou_class=0.3975091719641589, total_acc=0.9017308738468978, class_avg_acc=0.44986263803105836,
+
+ious=[       nan        nan        nan        nan        nan        nan
+        nan 1.93662052 0.93564097        nan        nan 1.79206827
+        nan        nan        nan        nan        nan 0.
+        nan        nan        nan 0.98702318        nan 1.87211657
+        nan        nan 1.38372666        nan        nan        nan
+        nan        nan        nan        nan        nan        nan
+        nan        nan        nan        nan        nan        nan
+        nan        nan        nan]
+
+
+2022-07-04 09:30:11,886 [INFO] root: psnr=26.324005125473494, ssim=0.9017966347055499, miou=0.7373147488058577, miou_class=0.7594953831893996, total_acc=0.9796139490496206, class_avg_acc=0.8129123130102088, ious=[       nan        nan        nan        nan        nan        nan
+        nan 1.9784431  1.81089887        nan        nan 1.93636215
+        nan        nan        nan        nan        nan 1.42327378
+        nan 1.20222962        nan 1.61365614        nan 1.95933492
+        nan        nan 1.91800881        nan        nan        nan
+        nan        nan        nan        nan        nan        nan
+        nan        nan        nan        nan        nan        nan
+        nan        nan        nan]
+
+2022-07-06 13:49:32,730 [INFO] root: psnr=26.197664884386352, ssim=0.8996880118576507, miou=0.724226378598535, miou_class=0.759024347943209, total_acc=0.9793332291046718, class_avg_acc=0.8216978242534552, ious=[       nan        nan        nan        nan        nan        nan
+        nan 1.97931121 1.78977071        nan        nan 1.93556371
+        nan        nan        nan        nan        nan 1.42370261
+        nan 1.09631715        nan 1.61550717        nan 1.95836887
+        nan        nan 1.91392527        nan        nan        nan
+        nan        nan        nan        nan        nan        nan
+        nan        nan        nan        nan        nan        nan
+        nan        nan        nan]
+
+
+
+root: kitti360 step: 804  resolution: 10.000000 entropy_ray_zvals: 3.094220 KL_loss: 0.262412 level_0/smoothing_lambda: 0.000020 level_0/loss: 0.059067 level_0/pnsr: 12.286452 level_0/semantic: 1.779116 level_0/loss_all: nan level_1/smoothing_lambda: 0.000020 level_1/loss: 0.058111 level_1/pnsr: 12.357325 level_1/semantic: 1.533780 level_1/loss_all: 0.125656 iter_time: 0.389669
+
+depth_optimize:
+root: psnr=25.05218568786387, ssim=0.8761641041821275, miou=0.7039897671233123, miou_class=0.7562736187900625, total_acc=0.976475029292516, class_avg_acc=0.8306877306594629, ious=[       nan        nan        nan        nan        nan        nan
+        nan 1.9829348  1.75024152        nan        nan 1.92694928
+        nan        nan        nan        nan        nan 1.37188111
+        nan 1.17244499 0.75828271 1.56764628        nan 1.94421057
+        nan        nan 1.89867727        nan        nan        nan
+        nan        nan        nan        nan        nan        nan
+        nan        nan        nan        nan        nan        nan
+        nan        nan        nan]
+
+
+
+ psnr=23.99090386017488, ssim=0.8679736904015515, miou=0.7282803994690483, miou_class=0.7558556813113028
